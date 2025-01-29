@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Document Assistant</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f9ff;
+        }
+        .chat-container {
+            height: calc(100vh - 280px);
+        }
+        .typing-indicator {
+            display: inline-block;
+            padding: 8px 16px;
+        }
+        .typing-indicator span {
+            height: 8px;
+            width: 8px;
+            margin: 0 2px;
+            background-color: #3b82f6;
+            display: inline-block;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out;
+        }
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+        .file-drop-area {
+            border: 2px dashed #cbd5e1;
+            transition: all 0.3s ease;
+        }
+        .file-drop-area.drag-over {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="min-h-screen">
+        <!-- Header -->
+        <header class="bg-white shadow-sm">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                <div class="flex justify-between items-center">
+                    <h1 class="text-2xl font-bold text-gray-900">AI Document Assistant</h1>
+                    <div class="flex space-x-4">
+                        <button @click="clearChat" class="text-gray-600 hover:text-gray-900">
+                            <i class="bi bi-trash text-xl"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- File Upload Area -->
+            <div class="mb-6">
+                <div class="file-drop-area p-6 rounded-lg bg-white shadow"
+                     @dragover.prevent="dragOver"
+                     @dragleave.prevent="dragLeave"
+                     @drop.prevent="handleDrop">
+                    <div class="text-center">
+                        <i class="bi bi-cloud-upload text-4xl text-blue-500"></i>
+                        <p class="mt-2 text-gray-600">Drag and drop files here or</p>
+                        <input type="file" 
+                               @change="handleFileSelect" 
+                               class="hidden" 
+                               ref="fileInput"
+                               multiple
+                               accept=".txt,.pdf,.doc,.docx,.csv">
+                        <button @click="$refs.fileInput.click()" 
+                                class="mt-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                            Choose Files
+                        </button>
+                    </div>
+                    <!-- File List -->
+                    <div v-if="uploadedFiles.length" class="mt-4">
+                        <h3 class="font-semibold mb-2">Uploaded Files:</h3>
+                        <ul class="space-y-2">
+                            <li v-for="file in uploadedFiles" 
+                                :key="file.name" 
+                                class="flex justify-between items-center bg-gray-50 p-2 rounded">
+                                <span>{{ file.name }}</span>
+                                <button @click="removeFile(file)" class="text-red-500">
+                                    <i class="bi bi-x-circle"></i>
+                                </button>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Interface -->
+            <div class="bg-white rounded-lg shadow">
+                <div class="p-4 border-b">
+                    <div class="flex justify-between items-center">
+                        <h2 class="font-semibold text-lg">Chat Interface</h2>
+                        <div class="flex space-x-2">
+                            <select v-model="outputFormat" 
+                                    class="border rounded-lg px-3 py-1 text-sm">
+                                <option value="text">Text</option>
+                                <option value="pdf">PDF</option>
+                                <option value="docx">DOCX</option>
+                                <option value="json">JSON</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-container overflow-y-auto p-4" ref="chatContainer">
+                    <div v-for="(message, index) in messages" 
+                         :key="index" 
+                         class="mb-4"
+                         :class="message.type === 'user' ? 'text-right' : 'text-left'">
+                        <div class="inline-block max-w-[80%] px-4 py-2 rounded-lg"
+                             :class="message.type === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-800'">
+                            <p class="whitespace-pre-wrap">{{ message.text }}</p>
+                            <div v-if="message.type === 'ai' && message.hasDownload" 
+                                 class="mt-2 text-right">
+                                <button @click="downloadResponse(message)" 
+                                        class="text-sm text-blue-600 hover:text-blue-800">
+                                    <i class="bi bi-download"></i> Download Response
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-if="isTyping" class="typing-indicator">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                </div>
+                <div class="p-4 border-t">
+                    <form @submit.prevent="sendMessage" class="flex space-x-2">
+                        <input type="text" 
+                               v-model="userInput" 
+                               placeholder="Ask about your documents..." 
+                               class="flex-1 rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <button type="submit" 
+                                class="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition-colors">
+                            Send
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const { createApp } = Vue
+
+        createApp({
+            data() {
+                return {
+                    messages: [],
+                    userInput: '',
+                    isTyping: false,
+                    uploadedFiles: [],
+                    isDragOver: false,
+                    outputFormat: 'text'
+                }
+            },
+            methods: {
+                dragOver(e) {
+                    e.target.classList.add('drag-over')
+                },
+                dragLeave(e) {
+                    e.target.classList.remove('drag-over')
+                },
+                handleDrop(e) {
+                    e.target.classList.remove('drag-over')
+                    const files = Array.from(e.dataTransfer.files)
+                    this.processFiles(files)
+                },
+                handleFileSelect(e) {
+                    const files = Array.from(e.target.files)
+                    this.processFiles(files)
+                },
+                processFiles(files) {
+                    files.forEach(file => {
+                        if (!this.uploadedFiles.find(f => f.name === file.name)) {
+                            this.uploadedFiles.push(file)
+                            this.messages.push({
+                                type: 'ai',
+                                text: `File "${file.name}" has been processed and added to the knowledge base.`
+                            })
+                        }
+                    })
+                },
+                removeFile(file) {
+                    this.uploadedFiles = this.uploadedFiles.filter(f => f !== file)
+                    this.messages.push({
+                        type: 'ai',
+                        text: `File "${file.name}" has been removed from the knowledge base.`
+                    })
+                },
+                async sendMessage(e) {
+                    if (!this.userInput.trim()) return
+
+                    // Add user message
+                    this.messages.push({
+                        type: 'user',
+                        text: this.userInput
+                    })
+
+                    const query = this.userInput
+                    this.userInput = ''
+                    this.isTyping = true
+
+                    await this.simulateAIResponse(query)
+
+                    this.$nextTick(() => {
+                        this.scrollToBottom()
+                    })
+                },
+                async simulateAIResponse(query) {
+                    await new Promise(resolve => setTimeout(resolve, 1500))
+
+                    const response = {
+                        type: 'ai',
+                        text: `Generated response for: "${query}"\n\nAnalysis based on uploaded documents using:\n- ChromaDB for document storage\n- RAG for context enhancement\n- LangChain for processing\n- Advanced ML models for analysis`,
+                        hasDownload: true
+                    }
+
+                    this.isTyping = false
+                    this.messages.push(response)
+                },
+                downloadResponse(message) {
+                    const content = message.text
+                    const blob = new Blob([content], { type: 'text/plain' })
+                    const url = window.URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `response.${this.outputFormat}`
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                    window.URL.revokeObjectURL(url)
+                },
+                scrollToBottom() {
+                    const container = this.$refs.chatContainer
+                    container.scrollTop = container.scrollHeight
+                },
+                clearChat() {
+                    this.messages = []
+                    this.messages.push({
+                        type: 'ai',
+                        text: 'Chat history cleared. How can I help you?'
+                    })
+                }
+            },
+            mounted() {
+                this.messages.push({
+                    type: 'ai',
+                    text: 'Welcome! Upload your documents and I'll help you analyze them. You can ask questions about the content once uploaded.'
+                })
+            }
+        }).mount('#app')
+    </script>
+<script>document.body.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); return }, { passive: false })</script>
+	</body>
+</html>
